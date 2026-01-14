@@ -141,87 +141,86 @@ if uploaded_file:
             st.stop()
 
         with col2:
-            status_container = st.status("🧙‍♂️ 魔法师正在观察画作...", expanded=True)
-            
-            # --- 1. 构建提示词 (Prompt Engineering) ---
-            # 这里使用了 V6.0 的“身份锁定”逻辑，防止兔子变狐狸
-            
-            style_prompt = ""
-            if style == "3D 皮克斯动画":
-                style_prompt = "high-quality 3D Disney Pixar style render, C4D, octane render, cute, glossy texture, studio lighting, vivid colors"
-            elif style == "宫崎骏二次元":
-                style_prompt = "beautiful Studio Ghibli anime style, vibrant colors, detailed background, hand-drawn feel, Hayao Miyazaki style"
-            elif style == "梦幻水彩":
-                style_prompt = "soft watercolor painting, artistic, pastel colors, dreamy, wet-on-wet technique, illustration"
-            elif style == "乐高积木风":
-                style_prompt = "lego bricks style, 3d render, plastic texture, toy world, macro photography"
-            elif style == "写实油画":
-                style_prompt = "classic oil painting, heavy brush strokes, artistic, detailed texture, van gogh style"
-
-            base_instruction = ""
-            if mode == "✨ 细节增强 (单图)":
-                base_instruction = f"""
-                You are an expert art director. Analyze the attached child's sketch carefully.
-                Step 1: Identify the main subject (Animal species? Human?). Be VERY specific. If it looks like a rabbit, say 'White Rabbit'. If it's a car, say 'Yellow Car'.
-                Step 2: Identify actions and objects.
-                Step 3: Identify colors of the subject and objects strictly based on the sketch.
-                Step 4: Write a detailed image generation prompt in English to re-imagine this EXACT scene in {style_prompt}.
-                IMPORTANT: The prompt must explicitly state the animal species/character and action to prevent hallucination. Do not add objects that are not there.
-                Output ONLY the English prompt text.
-                """
-            else: # 四格漫画
-                base_instruction = "Analyze this sketch. Write a prompt for a '4-panel comic strip' featuring THIS SPECIFIC character. Describe a funny short sequence suitable for kids. Request 'thick black outlines, comic book style, speech bubbles with simple English text'. Ensure the character looks consistent in all panels. Output ONLY the English prompt text."
-
-            # --- 2. 调用大脑 (Vision API) ---
-            image_bytes = uploaded_file.getvalue()
-            
-            if "Google" in provider:
-                status.write("🧠 Gemini 正在思考...")
-                image_prompt = analyze_with_gemini(image_bytes, base_instruction, active_key)
-            else:
-                status.write("🧠 SiliconFlow 正在思考...")
-                image_prompt = analyze_with_silicon(image_bytes, base_instruction, active_key)
-            
-            if not image_prompt:
-                status.update(label="识别失败", state="error")
-                st.stop()
+            # --- 🔴 关键修复点：使用 with ... as status 语法 ---
+            with st.status("🧙‍♂️ 魔法师正在观察画作...", expanded=True) as status:
                 
-            # print(image_prompt) # 调试用
+                # --- 1. 构建提示词 (Prompt Engineering) ---
+                style_prompt = ""
+                if style == "3D 皮克斯动画":
+                    style_prompt = "high-quality 3D Disney Pixar style render, C4D, octane render, cute, glossy texture, studio lighting, vivid colors"
+                elif style == "宫崎骏二次元":
+                    style_prompt = "beautiful Studio Ghibli anime style, vibrant colors, detailed background, hand-drawn feel, Hayao Miyazaki style"
+                elif style == "梦幻水彩":
+                    style_prompt = "soft watercolor painting, artistic, pastel colors, dreamy, wet-on-wet technique, illustration"
+                elif style == "乐高积木风":
+                    style_prompt = "lego bricks style, 3d render, plastic texture, toy world, macro photography"
+                elif style == "写实油画":
+                    style_prompt = "classic oil painting, heavy brush strokes, artistic, detailed texture, van gogh style"
 
-            # --- 3. 调用画手 (Pollinations/Flux) ---
-            status.write("🎨 正在绘制高清大图 (Flux)...")
-            
-            seed = random.randint(0, 10000)
-            # URL Encode
-            encoded_prompt = quote(image_prompt)
-            # Pollinations API URL
-            image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true&seed={seed}"
-            
-            # --- 4. 显示结果 ---
-            status.update(label="魔法完成！", state="complete", expanded=False)
-            
-            st.image(image_url, caption=f"AI 重绘作品 ({style})", use_container_width=True)
-            
-            # 下载按钮
-            try:
-                img_data = requests.get(image_url).content
-                st.download_button(
-                    label="📥 保存高清大图",
-                    data=img_data,
-                    file_name="magic_canvas.png",
-                    mime="image/png"
-                )
-            except:
-                st.warning("图片下载准备失败，请右键另存为。")
+                base_instruction = ""
+                if mode == "✨ 细节增强 (单图)":
+                    base_instruction = f"""
+                    You are an expert art director. Analyze the attached child's sketch carefully.
+                    Step 1: Identify the main subject (Animal species? Human?). Be VERY specific. If it looks like a rabbit, say 'White Rabbit'. If it's a car, say 'Yellow Car'.
+                    Step 2: Identify actions and objects.
+                    Step 3: Identify colors of the subject and objects strictly based on the sketch.
+                    Step 4: Write a detailed image generation prompt in English to re-imagine this EXACT scene in {style_prompt}.
+                    IMPORTANT: The prompt must explicitly state the animal species/character and action to prevent hallucination. Do not add objects that are not there.
+                    Output ONLY the English prompt text.
+                    """
+                else: # 四格漫画
+                    base_instruction = "Analyze this sketch. Write a prompt for a '4-panel comic strip' featuring THIS SPECIFIC character. Describe a funny short sequence suitable for kids. Request 'thick black outlines, comic book style, speech bubbles with simple English text'. Ensure the character looks consistent in all panels. Output ONLY the English prompt text."
 
-            # 额外福利：如果是漫画模式且用了 Gemini，讲个故事
-            if mode == "🖼️ 四格漫画 (故事)" and "Google" in provider:
-                with st.expander("📖 听 Gemini 讲故事"):
-                    story_prompt = f"Based on this image description: '{image_prompt}', write a very short, warm bedtime story for kids in Simplified Chinese. Use Emojis."
-                    try:
-                        genai.configure(api_key=active_key)
-                        model = genai.GenerativeModel('gemini-1.5-flash')
-                        story = model.generate_content(story_prompt).text
-                        st.write(story)
-                    except:
-                        pass
+                # --- 2. 调用大脑 (Vision API) ---
+                image_bytes = uploaded_file.getvalue()
+                
+                if "Google" in provider:
+                    status.write("🧠 Gemini 正在思考...")
+                    image_prompt = analyze_with_gemini(image_bytes, base_instruction, active_key)
+                else:
+                    status.write("🧠 SiliconFlow 正在思考...")
+                    image_prompt = analyze_with_silicon(image_bytes, base_instruction, active_key)
+                
+                if not image_prompt:
+                    status.update(label="识别失败", state="error")
+                    st.stop()
+                    
+                # print(image_prompt) # 调试用
+
+                # --- 3. 调用画手 (Pollinations/Flux) ---
+                status.write("🎨 正在绘制高清大图 (Flux)...")
+                
+                seed = random.randint(0, 10000)
+                # URL Encode
+                encoded_prompt = quote(image_prompt)
+                # Pollinations API URL
+                image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true&seed={seed}"
+                
+                # --- 4. 显示结果 ---
+                status.update(label="魔法完成！", state="complete", expanded=False)
+                
+                st.image(image_url, caption=f"AI 重绘作品 ({style})", use_container_width=True)
+                
+                # 下载按钮
+                try:
+                    img_data = requests.get(image_url).content
+                    st.download_button(
+                        label="📥 下载图片",
+                        data=img_data,
+                        file_name="magic_canvas.png",
+                        mime="image/png"
+                    )
+                except:
+                    st.warning("图片下载准备失败，请右键另存为。")
+
+                # 额外福利：如果是漫画模式且用了 Gemini，讲个故事
+                if mode == "🖼️ 四格漫画 (故事)" and "Google" in provider:
+                    with st.expander("📖 听 Gemini 讲故事"):
+                        story_prompt = f"Based on this image description: '{image_prompt}', write a very short, warm bedtime story for kids in Simplified Chinese. Use Emojis."
+                        try:
+                            genai.configure(api_key=active_key)
+                            model = genai.GenerativeModel('gemini-1.5-flash')
+                            story = model.generate_content(story_prompt).text
+                            st.write(story)
+                        except:
+                            pass
