@@ -65,21 +65,35 @@ with st.sidebar:
         else:
             silicon_key = st.text_input("输入 SiliconFlow Key", type="password")
 
-# --- 核心函数 1: Google Gemini (你的最爱) ---
+# --- 核心函数 1: Google Gemini (自动纠错版) ---
 def analyze_with_gemini(image_bytes, prompt, api_key):
-    try:
-        genai.configure(api_key=api_key)
-        # Gemini 1.5 Flash 是目前的性价比之王，看图极准
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        
-        # 转换图片格式
-        image = Image.open(BytesIO(image_bytes))
-        
-        response = model.generate_content([prompt, image])
-        return response.text
-    except Exception as e:
-        st.error(f"Google Gemini 报错: {e}")
-        return None
+    # 定义一个“备胎列表”，如果第一个挂了，自动试下一个
+    models_to_try = [
+        'gemini-1.5-flash',          # 首选：最新快闪版
+        'gemini-1.5-flash-latest',   # 备选：最新别名
+        'gemini-1.5-pro',            # 备选：旗舰版
+        'gemini-pro-vision',         # 保底：上一代视觉模型
+    ]
+    
+    genai.configure(api_key=api_key)
+    image = Image.open(BytesIO(image_bytes))
+
+    last_error = None
+
+    for model_name in models_to_try:
+        try:
+            # print(f"正在尝试模型: {model_name} ...") # 调试用
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content([prompt, image])
+            return response.text
+        except Exception as e:
+            # 如果是 404 (找不到模型) 或者其他错误，记录下来，继续循环
+            last_error = e
+            continue
+    
+    # 如果循环完了还没成功，抛出最后一个错误
+    st.error(f"Google Gemini 所有模型都尝试失败。最后一次报错: {last_error}")
+    return None
 
 # --- 核心函数 2: SiliconFlow (备用) ---
 def analyze_with_silicon(image_bytes, prompt, api_key):
