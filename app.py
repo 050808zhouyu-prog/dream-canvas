@@ -10,98 +10,60 @@ from PIL import Image
 # --- 页面配置 ---
 st.set_page_config(
     page_title="DreamCanvas 魔法画板",
-    page_icon="🎨",
+    page_icon="🍌",
     layout="centered",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
-# --- 样式美化 ---
+# --- 样式优化 ---
 st.markdown("""
 <style>
     .stButton>button {
         width: 100%;
-        border-radius: 20px;
-        background-color: #4F46E5;
+        border-radius: 24px;
+        background: linear-gradient(90deg, #6366f1, #8b5cf6);
         color: white; 
         font-weight: bold;
-        padding: 0.5rem;
+        border: none;
+        padding: 0.6rem;
+        transition: transform 0.1s;
     }
-    .stButton>button:hover {
-        background-color: #4338CA;
-        color: white;
-        border-color: #4338CA;
+    .stButton>button:active {
+        transform: scale(0.98);
     }
-    .stSpinner > div {
-        border-top-color: #4F46E5 !important;
-    }
+    .stStatus { border-radius: 20px !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 侧边栏：配置 ---
-with st.sidebar:
-    st.header("🧠 大脑设置")
-    
-    # 选择模型提供商
-    provider = st.radio("选择视觉模型 (大脑)", ["Google Gemini (推荐)", "SiliconFlow (备用)"])
-    
-    st.divider()
-    
-    gemini_key = ""
-    silicon_key = ""
+# --- 自动加载 Key (优先从 Secrets 读取) ---
+GEMINI_KEY = st.secrets.get("GOOGLE_API_KEY", "")
+SILICON_KEY = st.secrets.get("SILICON_KEY", "")
 
-    # 根据选择显示对应的 Key 输入框
-    if provider == "Google Gemini (推荐)":
-        if "GOOGLE_API_KEY" in st.secrets:
-            gemini_key = st.secrets["GOOGLE_API_KEY"]
-            st.success("✅ Gemini Key 已加载")
-        else:
-            gemini_key = st.text_input("输入 Google Gemini Key", type="password")
-            st.caption("免费申请: aistudio.google.com")
-            
-    else:
-        if "SILICON_KEY" in st.secrets:
-            silicon_key = st.secrets["SILICON_KEY"]
-            st.success("✅ SiliconFlow Key 已加载")
-        else:
-            silicon_key = st.text_input("输入 SiliconFlow Key", type="password")
-
-# --- 核心函数 1: Google Gemini (自动纠错版) ---
-def analyze_with_gemini(image_bytes, prompt, api_key):
-    # 定义一个“备胎列表”，如果第一个挂了，自动试下一个
-    models_to_try = [
-        'gemini-1.5-flash',          # 首选：最新快闪版
-        'gemini-1.5-flash-latest',   # 备选：最新别名
-        'gemini-1.5-pro',            # 备选：旗舰版
-        'gemini-pro-vision',         # 保底：上一代视觉模型
-    ]
-    
-    genai.configure(api_key=api_key)
-    image = Image.open(BytesIO(image_bytes))
-
-    last_error = None
-
-    for model_name in models_to_try:
+# --- 核心函数 1: Google Gemini (大脑 - 推荐) ---
+def analyze_with_gemini(image_bytes, prompt):
+    try:
+        genai.configure(api_key=GEMINI_KEY)
+        # 指定最新稳定版模型
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        image = Image.open(BytesIO(image_bytes))
+        response = model.generate_content([prompt, image])
+        return response.text
+    except Exception as e:
+        # 如果 Flash 失败，尝试 Pro
         try:
-            # print(f"正在尝试模型: {model_name} ...") # 调试用
-            model = genai.GenerativeModel(model_name)
+            model = genai.GenerativeModel('gemini-1.5-pro')
             response = model.generate_content([prompt, image])
             return response.text
-        except Exception as e:
-            # 如果是 404 (找不到模型) 或者其他错误，记录下来，继续循环
-            last_error = e
-            continue
-    
-    # 如果循环完了还没成功，抛出最后一个错误
-    st.error(f"Google Gemini 所有模型都尝试失败。最后一次报错: {last_error}")
-    return None
+        except:
+            return None # 彻底失败
 
-# --- 核心函数 2: SiliconFlow (备用) ---
-def analyze_with_silicon(image_bytes, prompt, api_key):
+# --- 核心函数 2: SiliconFlow (备用大脑) ---
+def analyze_with_silicon(image_bytes, prompt):
     try:
         base64_image = base64.b64encode(image_bytes).decode('utf-8')
         url = "https://api.siliconflow.cn/v1/chat/completions"
         headers = {
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Bearer {SILICON_KEY}",
             "Content-Type": "application/json"
         }
         payload = {
@@ -121,120 +83,119 @@ def analyze_with_silicon(image_bytes, prompt, api_key):
         response = requests.post(url, headers=headers, json=payload, timeout=40)
         if response.status_code == 200:
             return response.json()['choices'][0]['message']['content']
-        else:
-            st.error(f"SiliconFlow 报错: {response.text}")
-            return None
-    except Exception as e:
-        st.error(f"网络请求失败: {e}")
+        return None
+    except:
         return None
 
 # --- 主界面 ---
-st.title("🍌 Nano Banana 魔法画板")
-st.caption("上传孩子的涂鸦，让 AI 施展魔法！")
+st.title("🍌 Nano Banana")
+st.caption("把涂鸦变成皮克斯电影！")
 
-uploaded_file = st.file_uploader("点击上传图片", type=["jpg", "png", "jpeg"])
+# 如果没有配置 Secrets，显示输入框
+if not GEMINI_KEY and not SILICON_KEY:
+    with st.expander("🔑 设置 API Key (建议在后台 Secrets 配置)"):
+        input_key = st.text_input("输入 Gemini 或 SiliconFlow Key", type="password")
+        if input_key.startswith("AIza"): GEMINI_KEY = input_key
+        elif input_key.startswith("sk-"): SILICON_KEY = input_key
+
+uploaded_file = st.file_uploader("上传画作", type=["jpg", "png", "jpeg"], label_visibility="collapsed")
 
 if uploaded_file:
-    # 布局：左边原图，右边结果
-    col1, col2 = st.columns([1, 1])
+    # 预览图
+    st.image(uploaded_file, caption="原始涂鸦", use_container_width=True)
     
+    # 选项
+    col1, col2 = st.columns(2)
     with col1:
-        st.image(uploaded_file, caption="原始涂鸦", use_container_width=True)
-        
-        st.write("---")
-        st.subheader("🎨 魔法配方")
-        mode = st.radio("模式", ["✨ 细节增强 (单图)", "🖼️ 四格漫画 (故事)"], horizontal=True)
-        style = st.selectbox("画风", ["3D 皮克斯动画", "宫崎骏二次元", "梦幻水彩", "乐高积木风", "写实油画"])
-        
-        start_btn = st.button("开始施展魔法 🪄", type="primary")
+        style = st.selectbox("画风", ["3D 皮克斯动画", "宫崎骏二次元", "乐高积木", "毛毡玩具"])
+    with col2:
+        mode = st.selectbox("模式", ["✨ 单图重绘", "🖼️ 四格漫画"])
 
-    if start_btn:
-        active_key = gemini_key if "Google" in provider else silicon_key
-        if not active_key:
-            st.error(f"请先在左侧填入 {provider} 的 API Key！")
+    if st.button("开始施展魔法 🪄", type="primary"):
+        if not GEMINI_KEY and not SILICON_KEY:
+            st.error("请先配置 API Key！")
             st.stop()
 
-        with col2:
-            # --- 🔴 关键修复点：使用 with ... as status 语法 ---
-            with st.status("🧙‍♂️ 魔法师正在观察画作...", expanded=True) as status:
-                
-                # --- 1. 构建提示词 (Prompt Engineering) ---
-                style_prompt = ""
-                if style == "3D 皮克斯动画":
-                    style_prompt = "high-quality 3D Disney Pixar style render, C4D, octane render, cute, glossy texture, studio lighting, vivid colors"
-                elif style == "宫崎骏二次元":
-                    style_prompt = "beautiful Studio Ghibli anime style, vibrant colors, detailed background, hand-drawn feel, Hayao Miyazaki style"
-                elif style == "梦幻水彩":
-                    style_prompt = "soft watercolor painting, artistic, pastel colors, dreamy, wet-on-wet technique, illustration"
-                elif style == "乐高积木风":
-                    style_prompt = "lego bricks style, 3d render, plastic texture, toy world, macro photography"
-                elif style == "写实油画":
-                    style_prompt = "classic oil painting, heavy brush strokes, artistic, detailed texture, van gogh style"
+        # 定义外部变量，防止缩进问题
+        final_image_url = None
+        prompt_text = None
 
-                base_instruction = ""
-                if mode == "✨ 细节增强 (单图)":
-                    base_instruction = f"""
-                    You are an expert art director. Analyze the attached child's sketch carefully.
-                    Step 1: Identify the main subject (Animal species? Human?). Be VERY specific. If it looks like a rabbit, say 'White Rabbit'. If it's a car, say 'Yellow Car'.
-                    Step 2: Identify actions and objects.
-                    Step 3: Identify colors of the subject and objects strictly based on the sketch.
-                    Step 4: Write a detailed image generation prompt in English to re-imagine this EXACT scene in {style_prompt}.
-                    IMPORTANT: The prompt must explicitly state the animal species/character and action to prevent hallucination. Do not add objects that are not there.
-                    Output ONLY the English prompt text.
-                    """
-                else: # 四格漫画
-                    base_instruction = "Analyze this sketch. Write a prompt for a '4-panel comic strip' featuring THIS SPECIFIC character. Describe a funny short sequence suitable for kids. Request 'thick black outlines, comic book style, speech bubbles with simple English text'. Ensure the character looks consistent in all panels. Output ONLY the English prompt text."
+        with st.status("🧙‍♂️ 正在施法...", expanded=True) as status:
+            
+            # --- 1. 刑侦级提示词 (Identity Lock) ---
+            # 这里的 Prompt 专门为了防止“指鹿为马”
+            
+            style_desc = ""
+            if style == "3D 皮克斯动画":
+                style_desc = "3D Disney Pixar style render, C4D, octane render, cute, glossy texture, soft studio lighting, vivid colors, 8k"
+            elif style == "宫崎骏二次元":
+                style_desc = "Studio Ghibli anime style, Hayao Miyazaki, vibrant colors, detailed background, hand-drawn feel"
+            elif style == "乐高积木":
+                style_desc = "lego bricks style, 3d render, plastic texture, toy world, macro photography, tilt-shift"
+            elif style == "毛毡玩具":
+                style_desc = "felt texture, needle felting style, fuzzy, soft, craft, stop motion animation style"
 
-                # --- 2. 调用大脑 (Vision API) ---
-                image_bytes = uploaded_file.getvalue()
+            if mode == "✨ 单图重绘":
+                system_prompt = f"""
+                ACT AS A FORENSIC ART EXPERT. Look at the sketch extremely carefully.
                 
-                if "Google" in provider:
-                    status.write("🧠 Gemini 正在思考...")
-                    image_prompt = analyze_with_gemini(image_bytes, base_instruction, active_key)
-                else:
-                    status.write("🧠 SiliconFlow 正在思考...")
-                    image_prompt = analyze_with_silicon(image_bytes, base_instruction, active_key)
+                MANDATORY IDENTIFICATION STEPS:
+                1. What exactly is the MAIN CHARACTER? (Is it a Rabbit? A Dog? A Monster?). If it has long ears, it's likely a Rabbit.
+                2. What color is it? (White? Blue?).
+                3. What is it doing? (Driving a car? Flying?).
+                4. What objects are present? (A yellow car? A chick?).
                 
-                if not image_prompt:
-                    status.update(label="识别失败", state="error")
-                    st.stop()
-                    
-                # print(image_prompt) # 调试用
+                OUTPUT TASK:
+                Write a highly detailed image generation prompt in English to re-imagine this scene in {style_desc}.
+                
+                CRITICAL RULES:
+                - You MUST explicitly state the species (e.g., "A cute white rabbit with long ears").
+                - You MUST describe the action exactly (e.g., "Driving a small yellow toy car").
+                - Maintain the original composition and colors.
+                - Output ONLY the prompt text.
+                """
+            else:
+                system_prompt = "Analyze this sketch. Write a prompt for a '4-panel comic strip' featuring THIS SPECIFIC character. Describe a funny short sequence suitable for kids. Request 'thick black outlines, comic book style, speech bubbles with simple English text'. Ensure the character looks consistent in all panels. Output ONLY the English prompt text."
 
-                # --- 3. 调用画手 (Pollinations/Flux) ---
-                status.write("🎨 正在绘制高清大图 (Flux)...")
-                
-                seed = random.randint(0, 10000)
-                # URL Encode
-                encoded_prompt = quote(image_prompt)
-                # Pollinations API URL
-                image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true&seed={seed}"
-                
-                # --- 4. 显示结果 ---
-                status.update(label="魔法完成！", state="complete", expanded=False)
-                
-                st.image(image_url, caption=f"AI 重绘作品 ({style})", use_container_width=True)
-                
-                # 下载按钮
-                try:
-                    img_data = requests.get(image_url).content
-                    st.download_button(
-                        label="📥 下载图片",
-                        data=img_data,
-                        file_name="magic_canvas.png",
-                        mime="image/png"
-                    )
-                except:
-                    st.warning("图片下载准备失败，请右键另存为。")
+            # --- 2. 调用大脑 (优先 Gemini) ---
+            image_bytes = uploaded_file.getvalue()
+            
+            if GEMINI_KEY:
+                status.write("🧠 Google Gemini 正在识别画面...")
+                prompt_text = analyze_with_gemini(image_bytes, system_prompt)
+            
+            # 如果 Gemini 挂了或者没配，用 SiliconFlow 补位
+            if not prompt_text and SILICON_KEY:
+                status.write("🧠 切换到 SiliconFlow 识别画面...")
+                prompt_text = analyze_with_silicon(image_bytes, system_prompt)
+            
+            if not prompt_text:
+                status.update(label="识别失败，请检查 Key", state="error")
+                st.stop()
 
-                # 额外福利：如果是漫画模式且用了 Gemini，讲个故事
-                if mode == "🖼️ 四格漫画 (故事)" and "Google" in provider:
-                    with st.expander("📖 听 Gemini 讲故事"):
-                        story_prompt = f"Based on this image description: '{image_prompt}', write a very short, warm bedtime story for kids in Simplified Chinese. Use Emojis."
-                        try:
-                            genai.configure(api_key=active_key)
-                            model = genai.GenerativeModel('gemini-1.5-flash')
-                            story = model.generate_content(story_prompt).text
-                            st.write(story)
-                        except:
-                            pass
+            # --- 3. 调用画手 (Flux) ---
+            status.write(f"🎨 正在绘制 ({style})...")
+            
+            seed = random.randint(0, 100000)
+            encoded_prompt = quote(prompt_text)
+            
+            # 增加 enhance=true 参数，让 Flux 自动优化细节
+            # 增加 nologo=true 去水印
+            final_image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true&seed={seed}&enhance=true"
+            
+            status.update(label="✨ 魔法完成！", state="complete", expanded=False)
+
+        # --- 4. 结果展示 (移出 status 缩进) ---
+        if final_image_url:
+            st.image(final_image_url, caption=f"AI 重绘结果", use_container_width=True)
+            
+            # 调试信息 (展开看 prompt，确认 AI 到底识别出了什么)
+            with st.expander("👀 看看 AI 识别到了什么？"):
+                st.write(prompt_text)
+
+            # 下载
+            try:
+                img_data = requests.get(final_image_url).content
+                st.download_button("📥 保存图片", data=img_data, file_name="magic_art.png", mime="image/png")
+            except:
+                pass
